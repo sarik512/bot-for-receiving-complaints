@@ -15,8 +15,10 @@ async def main():
     # Регистрация обработчиков
     register_handlers(dp)
 
-    # Запуск бота
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == '__main__':
     import asyncio
