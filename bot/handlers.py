@@ -176,9 +176,9 @@ def register_handlers(dp: Dispatcher):
         
         # Проверяем, является ли пользователь администратором
         if admin_manager.is_admin(message.from_user.id):
-            await message.reply("Регистрация успешно завершена!", reply_markup=user_with_admin)
+            await message.reply(reply_markup=user_with_admin)
         else:
-            await message.reply("Регистрация успешно завершена!", reply_markup=start_button)
+            await message.reply(reply_markup=start_button)
 
     @dp.message(StateFilter(None))
     async def handle_main_menu(message: types.Message, state: FSMContext):
@@ -317,8 +317,12 @@ def register_handlers(dp: Dispatcher):
                 await state.update_data(full_name=user_data['full_name'], phone=user_data['phone'])
             
             await state.set_state(UserStates.waiting_for_address)
-            await message.reply(
+            await message.answer(
                 "Шаг 1/3: Напишите адрес или примерную проблемную улицу, номер дома, подъезд, этаж и квартиру или пропустите этот пункт:",
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
+            await message.answer(
+                "Используйте кнопки ниже:",
                 reply_markup=inline_steps
             )
         elif message.text == "💡Поделиться предложением":
@@ -332,50 +336,116 @@ def register_handlers(dp: Dispatcher):
                     is_suggestion=True
                 )
             await state.set_state(UserStates.waiting_for_description)
-            await message.reply("💡Распишите Ваше предложение в подробностях: (Добавьте фотографию, если есть)", reply_markup=inline_back)
+            await message.answer(
+                "💡Распишите Ваше предложение в подробностях: (Добавьте фотографию, если есть)",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+            await message.answer(
+                "Используйте кнопки ниже:",
+                reply_markup=inline_back
+            )
+        elif message.text == "🔙Назад":
+            await state.clear()
+            await message.answer(
+                "Выберите действие:",
+                reply_markup=submit_application
+            )
 
     @dp.callback_query()
     async def handle_callback(callback: types.CallbackQuery, state: FSMContext):
         current_state = await state.get_state()
         
         if callback.data == "back":
-            if current_state == UserStates.waiting_for_address:
-                await state.set_state(UserStates.waiting_for_application)
-                await callback.message.edit_text(
-                    "Выберите категорию:",
-                    reply_markup=types.InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [types.InlineKeyboardButton(text="📛Отправить заявку", callback_data="submit")],
-                            [types.InlineKeyboardButton(text="💡Поделиться предложением", callback_data="suggestion")]
-                        ]
+            data = await state.get_data()
+            # Если это предложение, возвращаемся в главное меню
+            if data.get('is_suggestion'):
+                await state.clear()
+                await callback.message.delete()
+                await callback.message.answer(
+                    "Выберите действие:",
+                    reply_markup=start_button
+                )
+                return
+                
+            if current_state == UserStates.waiting_for_call_phone:
+                await state.set_state(UserStates.waiting_for_contact)
+                await callback.message.delete()
+                await callback.message.answer(
+                    "Выберите способ связи:",
+                    reply_markup=contact_us
+                )
+            elif current_state in previous_states:
+                prev_state = previous_states[current_state]
+                if prev_state is None:
+                    # Возвращаемся в главное меню
+                    await state.clear()
+                    await callback.message.delete()
+                    await callback.message.answer(
+                        "Выберите действие:",
+                        reply_markup=start_button
                     )
-                )
-            elif current_state == UserStates.waiting_for_photo:
-                await state.set_state(UserStates.waiting_for_address)
-                await callback.message.edit_text(
-                    "Шаг 1/3: Напишите адрес или примерную проблемную улицу, номер дома, подъезд, этаж и квартиру или пропустите этот пункт:",
-                    reply_markup=inline_steps
-                )
-            elif current_state == UserStates.waiting_for_description:
-                await state.set_state(UserStates.waiting_for_photo)
-                await callback.message.edit_text(
-                    "Шаг 2/3: Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:",
-                    reply_markup=inline_steps
-                )
+                else:
+                    await state.set_state(prev_state)
+                    if prev_state == UserStates.waiting_for_application:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            "Выберите категорию:",
+                            reply_markup=submit_application
+                        )
+                    elif prev_state == UserStates.waiting_for_address:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            "Шаг 1/3: Напишите адрес или примерную проблемную улицу, номер дома, подъезд, этаж и квартиру или пропустите этот пункт:",
+                            reply_markup=types.ReplyKeyboardRemove()
+                        )
+                        await callback.message.answer(
+                            "Используйте кнопки ниже:",
+                            reply_markup=inline_steps
+                        )
+                    elif prev_state == UserStates.waiting_for_photo:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            "Шаг 2/3: Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:",
+                            reply_markup=types.ReplyKeyboardRemove()
+                        )
+                        await callback.message.answer(
+                            "Используйте кнопки ниже:",
+                            reply_markup=inline_steps
+                        )
+                    elif prev_state == UserStates.waiting_for_description:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            "Шаг 3/3: Напишите причину обращения в подробностях:",
+                            reply_markup=types.ReplyKeyboardRemove()
+                        )
+                        await callback.message.answer(
+                            "Используйте кнопки ниже:",
+                            reply_markup=inline_back
+                        )
         
         elif callback.data == "skip":
             if current_state == UserStates.waiting_for_address:
                 await state.update_data(address="Не указан")
                 await state.set_state(UserStates.waiting_for_photo)
-                await callback.message.edit_text(
+                await callback.message.delete()
+                await callback.message.answer(
                     "Шаг 2/3: Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:",
+                    reply_markup=types.ReplyKeyboardRemove()
+                )
+                await callback.message.answer(
+                    "Используйте кнопки ниже:",
                     reply_markup=inline_steps
                 )
             elif current_state == UserStates.waiting_for_photo:
                 await state.update_data(media_type=None, media_id=None)
                 await state.set_state(UserStates.waiting_for_description)
-                await callback.message.edit_text(
+                await callback.message.delete()
+                await callback.message.answer(
                     "Шаг 3/3: Напишите причину обращения в подробностях:",
+                    reply_markup=types.ReplyKeyboardRemove()
+                )
+                await callback.message.answer(
+                    "Используйте кнопки ниже:",
                     reply_markup=inline_back
                 )
         
@@ -392,6 +462,61 @@ def register_handlers(dp: Dispatcher):
                 "💡Распишите Ваше предложение в подробностях: (Добавьте фотографию, если есть)",
                 reply_markup=inline_back
             )
+            
+        elif callback.data == "phone_correct":
+            # Получаем данные пользователя из базы
+            user_data = db.get_user(callback.from_user.id)
+            # Отправляем сообщение в админ группу
+            admin_message = (
+                "📞 Запрос на звонок:\n"
+                f"Имя: {user_data['full_name']}\n"
+                f"Телефон: {user_data['phone']}\n"
+                f"Username: @{callback.from_user.username}"
+            )
+            await callback.bot.send_message(chat_id=ADMIN_GROUP_ID, text=admin_message)
+            # Отвечаем пользователю
+            await callback.message.edit_text(
+                "✅Отлично! Наш диспетчер перезвонит Вам в ближайшее время."
+            )
+            await callback.message.answer("Выберите нужное действие:", reply_markup=start_button)
+            await state.clear()
+        
+        elif callback.data in ["phone_change"]:
+            if callback.data == "phone_change":
+                await callback.message.edit_text(
+                    "Пожалуйста, введите ваш актуальный номер телефона в формате +7XXXXXXXXXX:"
+                )
+                await state.set_state(UserStates.waiting_for_call_phone)
+        
+        elif callback.data == "reply":
+            # Получаем информацию о пользователе из сохраненных данных
+            user_info = last_messages.get(callback.message.message_id)
+            if user_info:
+                await state.set_state(UserStates.waiting_for_reply_text)
+                await state.update_data(
+                    reply_to_user_id=user_info['user_id'],
+                    reply_to_full_name=user_info['full_name']
+                )
+                await callback.message.reply(
+                    f"Введите ответ для пользователя {user_info['full_name']}:",
+                    reply_markup=types.ReplyKeyboardMarkup(
+                        keyboard=[[types.KeyboardButton(text="🔄 Вернуться в панель администратора")]],
+                        resize_keyboard=True
+                    )
+                )
+            else:
+                await callback.answer("❌ Ошибка: информация о пользователе не найдена")
+        
+        elif callback.data == "end_chat":
+            if current_state == UserStates.in_admin_chat:
+                await state.clear()
+                await callback.message.delete()  # Удаляем сообщение с inline кнопками
+                await callback.message.answer(
+                    "✅ Диалог завершен. Выберите нужное действие:",
+                    reply_markup=start_button
+                )
+            else:
+                await callback.answer("❌ Ошибка: диалог уже завершен")
         
         await callback.answer()
 
@@ -399,83 +524,110 @@ def register_handlers(dp: Dispatcher):
     async def handle_address(message: types.Message, state: FSMContext):
         if message.text == "🔙Назад":
             await state.set_state(UserStates.waiting_for_application)
-            await message.reply("Выберите категорию:", reply_markup=submit_application)
+            await message.answer("Выберите категорию:", reply_markup=submit_application)
             return
             
         # Сохраняем адрес в данных состояния
         await state.update_data(address=message.text)
         await state.set_state(UserStates.waiting_for_photo)
-        await message.reply(
+        await message.answer(
             "Шаг 2/3: Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:",
             reply_markup=inline_steps
         )
 
     @dp.message(StateFilter(UserStates.waiting_for_photo))
     async def handle_photo(message: types.Message, state: FSMContext):
+        if message.text == "🔙Назад":
+            await state.set_state(UserStates.waiting_for_address)
+            await message.answer(
+                "Шаг 1/3: Напишите адрес или примерную проблемную улицу, номер дома, подъезд, этаж и квартиру или пропустите этот пункт:",
+                reply_markup=inline_steps
+            )
+            return
+            
         if message.photo or message.video:
             # Сохраняем медиафайл в данных состояния
             media_type = "photo" if message.photo else "video"
             media_id = message.photo[-1].file_id if message.photo else message.video.file_id
             await state.update_data(media_type=media_type, media_id=media_id)
             await state.set_state(UserStates.waiting_for_description)
-            await message.reply(
+            await message.answer(
                 "Шаг 3/3: Напишите причину обращения в подробностях:",
                 reply_markup=inline_back
             )
         else:
-            await message.reply(
+            await message.answer(
                 "❌В данном пункте нужно обязательно отправить фотографию или видео в виде медиа-сообщения. Попробуйте еще раз.",
                 reply_markup=inline_steps
             )
 
     @dp.message(StateFilter(UserStates.waiting_for_description))
     async def handle_description(message: types.Message, state: FSMContext):
-        # Получаем все данные заявки и пользователя
+        if message.text == "🔙Назад":
+            await state.set_state(UserStates.waiting_for_photo)
+            await message.answer(
+                "Шаг 2/3: Прикрепите фотографию или видео к своей заявке или пропустите этот пункт:",
+                reply_markup=inline_steps
+            )
+            return
+
+        # Сохраняем описание в данных состояния
+        await state.update_data(description=message.text)
+        
+        # Получаем все данные состояния
         data = await state.get_data()
         
-        # Определяем тип сообщения (жалоба или предложение)
-        message_type = "предложение" if data.get('is_suggestion') else "жалоба"
+        # Получаем данные пользователя из базы
+        user_data = db.get_user(message.from_user.id)
         
-        # Формируем сообщение для пользователя
-        user_response = f"✅ Ваше {message_type} отправлено администрации. Спасибо за обращение!"
-        
-        # Формируем сообщение для группы администраторов
-        admin_response = (
-            f"❗️Поступило новое {message_type}:\n\n"
-            f"username: @{message.from_user.username}\n"
-            f"Имя и Фамилия: {data.get('full_name')}\n"
-            f"Номер телефона: {data.get('phone')}\n"
-        )
-        
-        if not data.get('is_suggestion'):
-            admin_response += f"Адрес: {data.get('address', 'Не указан')}\n"
-        
-        admin_response += f"Содержание: {message.text}"
-
-        # Отправляем сообщение в группу администраторов
-        if data.get('media_type') == 'photo':
-            await message.bot.send_photo(
-                chat_id=ADMIN_GROUP_ID,
-                photo=data['media_id'],
-                caption=admin_response
+        if user_data:
+            # Формируем сообщение для отправки администратору
+            admin_message = (
+                f"📝 Новая заявка!\n\n"
+                f"👤 От: {user_data['full_name']}\n"
+                f"📞 Телефон: {user_data['phone']}\n"
+                f"📍 Адрес: {data.get('address', 'Не указан')}\n"
+                f"📄 Описание: {data['description']}"
             )
-        elif data.get('media_type') == 'video':
-            await message.bot.send_video(
-                chat_id=ADMIN_GROUP_ID,
-                video=data['media_id'],
-                caption=admin_response
+            
+            # Отправляем сообщение администратору
+            if data.get('media_type') == 'photo':
+                await message.bot.send_photo(
+                    ADMIN_GROUP_ID,
+                    data['media_id'],
+                    caption=admin_message,
+                    reply_markup=reply_button
+                )
+            elif data.get('media_type') == 'video':
+                await message.bot.send_video(
+                    ADMIN_GROUP_ID,
+                    data['media_id'],
+                    caption=admin_message,
+                    reply_markup=reply_button
+                )
+            else:
+                await message.bot.send_message(
+                    ADMIN_GROUP_ID,
+                    admin_message,
+                    reply_markup=reply_button
+                )
+            
+            # Отправляем подтверждение пользователю
+            await message.answer(
+                "✅ Ваша заявка успешно отправлена!\n"
+                "Мы рассмотрим её в ближайшее время.\n\n"
+                "Вы можете отправить еще одну заявку или вернуться в главное меню:",
+                reply_markup=start_button
             )
+            
+            # Очищаем состояние
+            await state.clear()
         else:
-            await message.bot.send_message(
-                chat_id=ADMIN_GROUP_ID,
-                text=admin_response
+            await message.answer(
+                "❌ Произошла ошибка при отправке заявки. Пожалуйста, попробуйте позже.",
+                reply_markup=start_button
             )
-        
-        # Отправляем подтверждение пользователю
-        await message.reply(user_response, reply_markup=start_button)
-        
-        # Очищаем состояние
-        await state.clear()
+            await state.clear()
 
     @dp.message(StateFilter(UserStates.waiting_for_contact))
     async def handle_contact(message: types.Message, state: FSMContext):
@@ -484,16 +636,9 @@ def register_handlers(dp: Dispatcher):
             user_data = db.get_user(message.from_user.id)
             if user_data:
                 await state.set_state(UserStates.waiting_for_call_phone)
-                await message.reply(
+                await message.answer(
                     f"Это Ваш верный номер телефона {user_data['phone']}?",
-                    reply_markup=types.InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [
-                                types.InlineKeyboardButton(text="✅Да, верно", callback_data="phone_correct"),
-                                types.InlineKeyboardButton(text="❌Нет, изменить", callback_data="phone_change")
-                            ]
-                        ]
-                    )
+                    reply_markup=confirm_phone
                 )
         elif message.text == "📞Свяжитесь со мной в чат-боте":
             # Получаем данные пользователя из базы
@@ -504,9 +649,10 @@ def register_handlers(dp: Dispatcher):
                     phone=user_data['phone']
                 )
                 await state.set_state(UserStates.in_admin_chat)
-                await message.reply(
+                await message.answer(
                     "✅📞✅Добрый день! Я - диспетчер управляющей компании \"УЭР-ЮГ\", готов помочь Вам. "
-                    "Напишите, пожалуйста, интересующий Вас вопрос и ожидайте нашего ответа",
+                    "Напишите, пожалуйста, интересующий Вас вопрос и ожидайте нашего ответа\n\n"
+                    "Для завершения диалога нажмите кнопку ниже:",
                     reply_markup=end_chat
                 )
 
@@ -521,9 +667,6 @@ def register_handlers(dp: Dispatcher):
             )
             return
 
-        # Обновляем номер телефона в базе данных
-        db.update_user_phone(message.from_user.id, phone)
-        
         # Отправляем сообщение в админ группу
         admin_message = (
             "📞 Запрос на звонок:\n"
@@ -532,6 +675,9 @@ def register_handlers(dp: Dispatcher):
             f"Username: @{message.from_user.username}"
         )
         await message.bot.send_message(chat_id=ADMIN_GROUP_ID, text=admin_message)
+        
+        # Обновляем номер телефона в базе данных
+        db.update_user_phone(message.from_user.id, phone)
         
         # Отвечаем пользователю
         await message.reply(
@@ -626,45 +772,52 @@ def register_handlers(dp: Dispatcher):
             f"От: {data.get('full_name')}\n"
             f"Телефон: {data.get('phone')}\n"
             f"Username: @{message.from_user.username}\n"
-            f"Сообщение: {message.text}"
+            f"Сообщение: {message.text if message.text else ''}"
         )
         
         # Отправляем сообщение в админ группу и сохраняем его ID
         sent_message = None
-        if message.photo:
-            sent_message = await message.bot.send_photo(
-                chat_id=ADMIN_GROUP_ID,
-                photo=message.photo[-1].file_id,
-                caption=admin_message,
-                reply_markup=reply_button
+        try:
+            if message.photo:
+                sent_message = await message.bot.send_photo(
+                    chat_id=ADMIN_GROUP_ID,
+                    photo=message.photo[-1].file_id,
+                    caption=admin_message if message.caption else None,
+                    reply_markup=reply_button
+                )
+            elif message.video:
+                sent_message = await message.bot.send_video(
+                    chat_id=ADMIN_GROUP_ID,
+                    video=message.video.file_id,
+                    caption=admin_message if message.caption else None,
+                    reply_markup=reply_button
+                )
+            else:
+                sent_message = await message.bot.send_message(
+                    chat_id=ADMIN_GROUP_ID,
+                    text=admin_message,
+                    reply_markup=reply_button
+                )
+            
+            # Сохраняем информацию о сообщении
+            if sent_message:
+                last_messages[sent_message.message_id] = {
+                    'user_id': message.from_user.id,
+                    'username': message.from_user.username,
+                    'full_name': data.get('full_name')
+                }
+            
+            # Отправляем подтверждение пользователю
+            await message.reply(
+                "✅ Ваше сообщение отправлено. Ожидайте ответа от диспетчера.",
+                reply_markup=end_chat
             )
-        elif message.video:
-            sent_message = await message.bot.send_video(
-                chat_id=ADMIN_GROUP_ID,
-                video=message.video.file_id,
-                caption=admin_message,
-                reply_markup=reply_button
+        except Exception as e:
+            print(f"Ошибка при отправке сообщения: {e}")
+            await message.reply(
+                "❌ Произошла ошибка при отправке сообщения. Пожалуйста, попробуйте позже.",
+                reply_markup=end_chat
             )
-        else:
-            sent_message = await message.bot.send_message(
-                chat_id=ADMIN_GROUP_ID,
-                text=admin_message,
-                reply_markup=reply_button
-            )
-        
-        # Сохраняем информацию о сообщении
-        if sent_message:
-            last_messages[sent_message.message_id] = {
-                'user_id': message.from_user.id,
-                'username': message.from_user.username,
-                'full_name': data.get('full_name')
-            }
-        
-        # Отправляем подтверждение пользователю
-        await message.reply(
-            "✅ Ваше сообщение отправлено. Ожидайте ответа от диспетчера.",
-            reply_markup=end_chat
-        )
 
     @dp.message(StateFilter(UserStates.waiting_for_reply_text))
     async def handle_reply_text(message: types.Message, state: FSMContext):
@@ -775,12 +928,34 @@ def register_handlers(dp: Dispatcher):
 
     @dp.message(AdminStates.waiting_for_block_reason)
     async def handle_block_reason(message: types.Message, state: FSMContext):
-        await admin_panel.handle_block_reason(message, state)
+        if message.text == "🔄 Вернуться в панель администратора":
+            await state.clear()
+            await message.reply("Вы вернулись в панель администратора", reply_markup=admin_panel)
+            return
+            
+        async with state.proxy() as data:
+            user_id = data['block_user_id']
+            user_info = data['block_user_info']
+            reason = None if message.text == "Пропустить" else message.text
+
+        try:
+            admin_manager.block_user(user_id, message.from_user.id, reason)
+            response = f"✅ Пользователь {user_info['full_name']} (@{user_info['username']}) заблокирован."
+            if reason:
+                response += f"\nПричина: {reason}"
+            await message.reply(response, reply_markup=admin_panel)
+        except Exception as e:
+            await message.reply(
+                f"❌ Произошла ошибка при блокировке пользователя: {str(e)}",
+                reply_markup=admin_panel
+            )
+
+        await state.clear()
 
     # Добавляем проверку на блокировку пользователя во все обработчики сообщений
     @dp.message()
     async def check_user_blocked(message: types.Message, state: FSMContext):
-        if admin_panel.is_user_blocked(message.from_user.id):
+        if db.is_user_blocked(message.from_user.id):
             await message.reply("🚫 Вы заблокированы администратором.")
             return True
         return False

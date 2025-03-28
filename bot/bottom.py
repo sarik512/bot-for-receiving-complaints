@@ -83,10 +83,8 @@ inline_back = types.InlineKeyboardMarkup(
 # Клавиатура для подтверждения телефона
 confirm_phone = types.InlineKeyboardMarkup(
     inline_keyboard=[
-        [
-            types.InlineKeyboardButton(text="✅Да, верно", callback_data="phone_correct"),
-            types.InlineKeyboardButton(text="❌Нет, изменить", callback_data="phone_change")
-        ]
+        [types.InlineKeyboardButton(text="✅Да, верно", callback_data="phone_correct")],
+        [types.InlineKeyboardButton(text="🔙Назад", callback_data="back")]
     ]
 )
 
