@@ -152,26 +152,68 @@ class AdminPanel:
         await state.clear()
 
     async def handle_broadcast(self, message: types.Message, state: FSMContext):
-        """Обработчик рассылки сообщений"""
+        """Обработчик рассылки"""
         if not self.is_admin(message.from_user.id):
+            await message.reply("❌ У вас нет прав администратора.")
             return
 
+        # Получаем всех пользователей
         users = self.db.get_all_users()
+        
+        # Исключаем создателя рассылки из списка получателей
+        users = [user for user in users if user['user_id'] != message.from_user.id]
+        
+        if not users:
+            await message.reply("❌ Нет пользователей для рассылки.")
+            return
+
+        # Отправляем сообщение каждому пользователю
         success_count = 0
         fail_count = 0
-
+        
+        # Отправляем сообщение о начале рассылки
+        status_message = await message.reply("📤 Начинаю рассылку...")
+        
         for user in users:
             try:
-                await message.bot.send_message(user['user_id'], message.text)
+                if message.photo:
+                    await message.bot.send_photo(
+                        chat_id=user['user_id'],
+                        photo=message.photo[-1].file_id,
+                        caption=message.caption if message.caption else None
+                    )
+                elif message.video:
+                    await message.bot.send_video(
+                        chat_id=user['user_id'],
+                        video=message.video.file_id,
+                        caption=message.caption if message.caption else None
+                    )
+                else:
+                    await message.bot.send_message(
+                        chat_id=user['user_id'],
+                        text=message.text
+                    )
                 success_count += 1
-            except Exception:
+            except Exception as e:
+                print(f"Ошибка при отправке сообщения пользователю {user['user_id']}: {e}")
                 fail_count += 1
-
-        await message.reply(
-            f"✅ Рассылка завершена\n"
-            f"Успешно отправлено: {success_count}\n"
-            f"Ошибок отправки: {fail_count}"
+            
+            # Обновляем статус каждые 10 сообщений
+            if (success_count + fail_count) % 10 == 0:
+                await status_message.edit_text(
+                    f"📤 Рассылка в процессе...\n"
+                    f"✅ Успешно: {success_count}\n"
+                    f"❌ Ошибок: {fail_count}"
+                )
+        
+        # Отправляем итоговый статус
+        await status_message.edit_text(
+            f"📤 Рассылка завершена!\n"
+            f"✅ Успешно отправлено: {success_count}\n"
+            f"❌ Ошибок: {fail_count}"
         )
+        
+        # Очищаем состояние
         await state.clear()
 
     async def handle_user_info(self, message: types.Message, state: FSMContext):
@@ -212,29 +254,25 @@ class AdminPanel:
     async def handle_block_user(self, message: types.Message, state: FSMContext):
         """Обработчик блокировки пользователя"""
         if not self.is_admin(message.from_user.id):
-            await message.reply("❌ У вас нет прав администратора.")
             return
 
         # Ищем пользователя по username или ID
         user = self.db.get_user_by_username_or_id(message.text)
         
         if user:
-            user_id = user['user_id']
-            if self.db.is_admin(user_id):
+            # Проверяем, не является ли пользователь администратором
+            if self.is_admin(user['user_id']):
                 await message.reply("❌ Нельзя заблокировать администратора.")
-            elif self.db.is_user_blocked(user_id):
-                block_info = self.db.get_block_info(user_id)
-                admin_info = f"администратором @{block_info['admin_username']}" if block_info['admin_username'] else f"администратором {block_info['admin_name']}"
-                await message.reply(
-                    f"❌ Этот пользователь уже заблокирован {admin_info}\n"
-                    f"Причина: {block_info['reason'] or 'не указана'}\n"
-                    f"Время блокировки: {block_info['blocked_at']}"
-                )
+                return
+            
+            # Проверяем, не заблокирован ли уже пользователь
+            if self.db.is_user_blocked(user['user_id']):
+                await message.reply("❌ Этот пользователь уже заблокирован.")
+                return
+            
             else:
                 # Запрашиваем причину блокировки
-                async with state.proxy() as data:
-                    data['block_user_id'] = user_id
-                    data['block_user_info'] = user
+                await state.update_data(block_user_id=user['user_id'], block_user_info=user)
                 await state.set_state(AdminStates.waiting_for_block_reason)
                 await message.reply(
                     "Введите причину блокировки пользователя или нажмите 'Пропустить':",
@@ -259,10 +297,10 @@ class AdminPanel:
             await message.reply("Вы вернулись в панель администратора", reply_markup=admin_panel)
             return
 
-        async with state.proxy() as data:
-            user_id = data['block_user_id']
-            user_info = data['block_user_info']
-            reason = None if message.text == "Пропустить" else message.text
+        data = await state.get_data()
+        user_id = data['block_user_id']
+        user_info = data['block_user_info']
+        reason = None if message.text == "Пропустить" else message.text
 
         try:
             self.db.block_user(user_id, message.from_user.id, reason)

@@ -39,10 +39,19 @@ class Database:
             username TEXT,
             full_name TEXT,
             phone TEXT,
+            current_state TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+        
+        # Проверяем наличие столбца current_state и добавляем его, если отсутствует
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'current_state' not in columns:
+            print("Добавление столбца current_state в таблицу users...")
+            cursor.execute('ALTER TABLE users ADD COLUMN current_state TEXT')
+            print("Столбец current_state успешно добавлен")
         
         # Таблица администраторов
         cursor.execute('''
@@ -306,6 +315,65 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute('SELECT 1 FROM blocked_users WHERE user_id = ?', (user_id,))
         return cursor.fetchone() is not None
+
+    def save_user_state(self, user_id: int, state_name: str):
+        """Сохраняет текущее состояние пользователя"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'UPDATE users SET current_state = ?, last_updated = CURRENT_TIMESTAMP WHERE user_id = ?',
+            (state_name, user_id)
+        )
+        self.conn.commit()
+
+    def get_user_state(self, user_id: int) -> str:
+        """Получает текущее состояние пользователя"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT current_state FROM users WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result and result[0] else None
+
+    def clear_user_state(self, user_id: int):
+        """Очищает состояние пользователя"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'UPDATE users SET current_state = NULL, last_updated = CURRENT_TIMESTAMP WHERE user_id = ?',
+            (user_id,)
+        )
+        self.conn.commit()
+
+    def create_test_users(self, count: int = 30):
+        """Создание тестовых пользователей"""
+        import random
+        import string
+        
+        # Список случайных имен и фамилий
+        first_names = ["Александр", "Дмитрий", "Максим", "Сергей", "Андрей", "Алексей", "Артём", "Илья", "Кирилл", "Михаил"]
+        last_names = ["Иванов", "Смирнов", "Кузнецов", "Попов", "Васильев", "Петров", "Соколов", "Михайлов", "Новиков", "Федоров"]
+        
+        # Генерация случайных пользователей
+        for _ in range(count):
+            # Генерация случайного имени
+            full_name = f"{random.choice(first_names)} {random.choice(last_names)}"
+            
+            # Генерация случайного username
+            username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            
+            # Генерация случайного ID пользователя (от 1000000 до 9999999)
+            user_id = random.randint(1000000, 9999999)
+            
+            # Генерация случайного номера телефона
+            phone = f"+7{''.join(random.choices(string.digits, k=10))}"
+            
+            # Добавление пользователя в базу
+            self.add_user(user_id, username, full_name, phone)
+            
+            # Случайная блокировка некоторых пользователей
+            if random.random() < 0.2:  # 20% шанс блокировки
+                self.block_user(user_id, self.MAIN_ADMIN_ID, "Тестовая блокировка")
+            
+            # Случайное назначение некоторых пользователей как админов
+            if random.random() < 0.1:  # 10% шанс быть админом
+                self.add_admin(user_id, username, is_main_admin=False)
 
     def __del__(self):
         if hasattr(self, 'conn'):
